@@ -51,9 +51,10 @@ if df_master.empty or "名前" not in df_master.columns:
 
 member_list = df_master["名前"].tolist()
 
-# タブの切り替え
-tab1, tab2 = st.tabs(["📝 出席登録", "📊 出席集計"])
+# タブの切り替え（「記録の削除」タブを追加）
+tab1, tab2, tab3 = st.tabs(["📝 出席登録", "📊 出席集計", "🗑️ 記録の削除"])
 
+# --- タブ1: 出席登録 ---
 with tab1:
     st.header("日々の出席記録")
     with st.form("attendance_form", clear_on_submit=True):
@@ -64,9 +65,26 @@ with tab1:
         
         if submit_btn:
             date_str = target_date.strftime("%Y-%m-%d")
-            sheet_attendance.append_row([date_str, selected_member, note])
-            st.success(f"✅ {date_str} ： {selected_member} さんの出席を記録しました！")
+            
+            # 既存の記録を取得して重複チェック
+            attendance_records = sheet_attendance.get_all_records()
+            df_curr = pd.DataFrame(attendance_records)
+            
+            is_duplicate = False
+            if not df_curr.empty and "日付" in df_curr.columns and "名前" in df_curr.columns:
+                # 日付文字列の一致確認
+                df_curr["日付_str"] = pd.to_datetime(df_curr["日付"]).dt.strftime("%Y-%m-%d")
+                duplicate_check = df_curr[(df_curr["日付_str"] == date_str) & (df_curr["名前"] == selected_member)]
+                if not duplicate_check.empty:
+                    is_duplicate = True
+            
+            if is_duplicate:
+                st.error(f"⚠️ {date_str} の {selected_member} さんの出席記録は既に存在します！")
+            else:
+                sheet_attendance.append_row([date_str, selected_member, note])
+                st.success(f"✅ {date_str} ： {selected_member} さんの出席を記録しました！")
 
+# --- タブ2: 出席集計 ---
 with tab2:
     st.header("月間出席数の集計")
     attendance_records = sheet_attendance.get_all_records()
@@ -84,7 +102,9 @@ with tab2:
         total_days = df_filtered["日付"].nunique()
         st.metric(label=f"{selected_month} の総稽古日数", value=f"{total_days} 日")
         
-        attendance_counts = df_filtered["名前"].value_counts().reset_index()
+        # 重複を除いてユニークな出席日数（稽古日ごとに1回）で集計
+        df_unique = df_filtered.drop_duplicates(subset=["日付", "名前"])
+        attendance_counts = df_unique["名前"].value_counts().reset_index()
         attendance_counts.columns = ["名前", "出席日数"]
         
         df_summary = pd.merge(df_master[["名前"]], attendance_counts, on="名前", how="left").fillna(0)
@@ -94,3 +114,34 @@ with tab2:
             df_summary["出席率 (%)"] = ((df_summary["出席日数"] / total_days) * 100).round(1)
         
         st.dataframe(df_summary, use_container_width=True)
+
+# --- タブ3: 記録の削除 ---
+with tab3:
+    st.header("誤登録データの削除")
+    all_rows = sheet_attendance.get_all_values()
+    
+    if len(all_rows) <= 1:
+        st.info("削除できる出席記録がありません。")
+    else:
+        # ヘッダーを除くレコード一覧（スプレッドシートの行番号を保持）
+        options = []
+        for idx, row in enumerate(all_rows[1:], start=2):
+            date_val = row[0] if len(row) > 0 else ""
+            name_val = row[1] if len(row) > 1 else ""
+            note_val = row[2] if len(row) > 2 else ""
+            options.append({
+                "row_num": idx,
+                "label": f"行{idx}: {date_val} | {name_val} ({note_val})"
+            })
+        
+        selected_option = st.selectbox(
+            "削除したい記録を選択してください",
+            options,
+            format_func=lambda x: x["label"]
+        )
+        
+        if st.button("選択した記録を削除する", type="primary"):
+            row_to_delete = selected_option["row_num"]
+            sheet_attendance.delete_rows(row_to_delete)
+            st.success(f"✅ {selected_option['label']} を削除しました！")
+            st.rerun()
