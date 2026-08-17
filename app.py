@@ -40,12 +40,15 @@ MASTER_KEY = "16HSm3qYzzE2LqKE1EbDhI8ezWGQ2GCP98vHZgSapaDg"
 ATTENDANCE_KEY = "1fIgWsyGjJ5VAsJ4QImoBDLFn_6rNPMvBt7cYg8V3xPs"
 
 def get_sheets():
-    # Streamlit Cloud (Secrets) からの読み込みを優先、無ければローカルの credentials.json を使用
     if "gcp_service_account" in st.secrets:
         creds_info = dict(st.secrets["gcp_service_account"])
-        # json_data 形式で保存している場合への対応
         if "json_data" in creds_info:
             creds_info = json.loads(creds_info["json_data"])
+            
+        # private_key の改行コード置換補正
+        if "private_key" in creds_info:
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
+            
         creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
     else:
         creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
